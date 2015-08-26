@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/jonasi/pg"
-	"github.com/jonasi/pg/migrate"
 	"os"
 	"strconv"
+
+	"github.com/jonasi/pg"
+	"github.com/jonasi/pg/migrate"
 )
 
 func main() {

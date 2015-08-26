@@ -31,11 +31,13 @@ func (q *queryer) GetMany(ctxt context.Context, dest interface{}, query string, 
 	})
 }
 
-func (q *queryer) Exec(ctxt context.Context, query string, args ...interface{}) error {
-	return do(ctxt, query, args, func(query string, args ...interface{}) error {
-		_, err := q.impl.Exec(query, args...)
+func (q *queryer) Exec(ctxt context.Context, query string, args ...interface{}) (res sql.Result, err error) {
+	do(ctxt, query, args, func(query string, args ...interface{}) error {
+		res, err = q.impl.Exec(query, args...)
 		return err
 	})
+
+	return
 }
 
 func (q *queryer) Query(ctxt context.Context, query string, args ...interface{}) (rows *sqlx.Rows, err error) {

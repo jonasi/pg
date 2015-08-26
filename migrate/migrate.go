@@ -1,29 +1,30 @@
 package migrate
 
 import (
-	"github.com/jonasi/pg"
-	"golang.org/x/net/context"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/jonasi/pg"
+	"golang.org/x/net/context"
 )
 
 var Ctxt = context.Background()
 
 const defaultTable = "migration_log"
 
-type migrationEvent struct {
+type Event struct {
 	Name      string    `db:"name"`
 	Direction string    `db:"direction"`
 	CreatedAt time.Time `db:"created_at"`
 }
 
-type MigrationFn func(*pg.DB) error
+type MigrationFn func(*DB) error
 
 type Migration struct {
 	Name string
-	Up   func(*pg.DB) error
-	Down func(*pg.DB) error
+	Up   MigrationFn
+	Down MigrationFn
 }
 
 type migrations []Migration
@@ -40,32 +41,38 @@ func (m migrations) Len() int {
 	return len(m)
 }
 
-var defaultSet = &MigrationSet{
-	allMigrations: migrations{},
-	Table:         defaultTable,
+var defaultSet = &Set{
+	all:   migrations{},
+	Table: defaultTable,
 }
 
-type MigrationSet struct {
-	Table               string
-	db                  *pg.DB
-	txn                 *pg.Txn
-	err                 error
-	allMigrations       migrations
-	completedMigrations []migrationEvent
-	initOnce            sync.Once
+type Set struct {
+	Table    string     // Table name for the schema log
+	db       *pg.DB     // db instance
+	txn      *pg.Txn    // txn instance
+	err      error      // current error
+	all      migrations // all migrations in order
+	toRun    migrations // migrations that need to be run in order - subset of `all`
+	didRun   migrations // migrations that have been run in order - subset of `all`
+	log      []Event    // list of all migration events (in order)
+	initOnce sync.Once  // protect ms.init()
 }
 
-func (ms *MigrationSet) init() error {
+func (ms *Set) init() error {
 	var err error
 
 	ms.initOnce.Do(func() {
+		if err = ms.db.Open(); err != nil {
+			return
+		}
+
 		ms.txn, err = ms.db.Begin()
 
 		if err != nil {
 			return
 		}
 
-		err = ms.txn.Exec(Ctxt, `
+		_, err = ms.txn.Exec(Ctxt, `
 			create table if not exists `+ms.Table+` (
 				name text not null,
 				created_at timestamptz not null,
@@ -77,19 +84,39 @@ func (ms *MigrationSet) init() error {
 			return
 		}
 
-		var migrations []migrationEvent
-
-		err = ms.txn.GetMany(Ctxt, &migrations, `select * from `+ms.Table+` order by created_at`)
+		var log []Event
+		err = ms.txn.GetMany(Ctxt, &log, `select * from `+ms.Table+` order by created_at`)
 
 		if err != nil {
 			return
 		}
+
+		ms.log = log
+
+		var (
+			toRun  = migrations{}
+			didRun = map[string]bool{}
+		)
+
+		for i := range log {
+			didRun[log[i].Name] = log[i].Direction == "up"
+		}
+
+		for i := range ms.all {
+			val, ok := didRun[ms.all[i].Name]
+
+			if !ok || val == false {
+				toRun = append(toRun, ms.all[i])
+			}
+		}
+
+		ms.toRun = toRun
 	})
 
 	return ms.handleError(err)
 }
 
-func (ms *MigrationSet) handleError(err error) error {
+func (ms *Set) handleError(err error) error {
 	if err != nil {
 		ms.err = err
 
@@ -102,30 +129,32 @@ func (ms *MigrationSet) handleError(err error) error {
 	return err
 }
 
-func (ms *MigrationSet) Add(name string, up MigrationFn, down MigrationFn) {
-	ms.allMigrations = append(ms.allMigrations, Migration{
+func (ms *Set) Add(name string, up MigrationFn, down MigrationFn) {
+	ms.all = append(ms.all, Migration{
 		Name: name,
 		Up:   up,
 		Down: down,
 	})
 
-	sort.Sort(ms.allMigrations)
+	sort.Sort(ms.all)
 }
 
-func (ms *MigrationSet) Up(count int) error {
+func (ms *Set) Up(count int) error {
 	if err := ms.init(); err != nil {
 		return err
 	}
 
-	return nil
+	err := ms.txn.Commit()
+	return ms.handleError(err)
 }
 
-func (ms *MigrationSet) Down(count int) error {
+func (ms *Set) Down(count int) error {
 	if err := ms.init(); err != nil {
 		return err
 	}
 
-	return nil
+	err := ms.txn.Commit()
+	return ms.handleError(err)
 }
 
 func Add(name string, up MigrationFn, down MigrationFn) bool {

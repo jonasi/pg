@@ -12,34 +12,39 @@ func Main(db *pg.DB, args []string) {
 	}
 
 	var (
-		fs   = flag.NewFlagSet(args[0], flag.ExitOnError)
-		up   = fs.Int("up", 0, "the number of migrations to run")
-		down = fs.Int("down", 0, "the number of migrations to run")
-		list = fs.Bool("list", false, "list all migrations")
+		fs     = flag.NewFlagSet(args[0], flag.ExitOnError)
+		up     = fs.Int("up", 0, "the number of migrations to run")
+		down   = fs.Int("down", 0, "the number of migrations to rollback")
+		dryrun = fs.Bool("dryrun", false, "perform a dry run operation")
 	)
 
-	fs.Parse(args)
+	fs.Parse(args[1:])
 
 	defaultSet.db = db
 
 	if *up > 0 {
-		if err := defaultSet.Up(*up); err != nil {
+		if *dryrun {
 
+		}
+
+		if err := defaultSet.Up(*up); err != nil {
+			panic(err)
 		}
 
 		return
 	}
 
 	if *down > 0 {
-		if err := defaultSet.Down(*down); err != nil {
+		if *dryrun {
 
 		}
 
+		if err := defaultSet.Down(*down); err != nil {
+			panic(err)
+		}
+
 		return
-
 	}
 
-	if *list {
-
-	}
+	fs.PrintDefaults()
 }
