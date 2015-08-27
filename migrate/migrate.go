@@ -11,7 +11,7 @@ import (
 
 var Ctxt = context.Background()
 
-const defaultTable = "migration_log"
+const defaultTable = "schema_migration_log"
 
 type Event struct {
 	Name      string    `db:"name"`
@@ -75,8 +75,8 @@ func (ms *Set) init() error {
 		_, err = ms.txn.Exec(Ctxt, `
 			create table if not exists `+ms.Table+` (
 				name text not null,
-				created_at timestamptz not null,
-				direction text not null
+				direction text not null,
+				created_at timestamptz not null default now()
 			)
 		`)
 
@@ -94,23 +94,27 @@ func (ms *Set) init() error {
 		ms.log = log
 
 		var (
-			toRun  = migrations{}
-			didRun = map[string]bool{}
+			toRun     = migrations{}
+			didRun    = migrations{}
+			didRunMap = map[string]bool{}
 		)
 
 		for i := range log {
-			didRun[log[i].Name] = log[i].Direction == "up"
+			didRunMap[log[i].Name] = log[i].Direction == "up"
 		}
 
 		for i := range ms.all {
-			val, ok := didRun[ms.all[i].Name]
+			val, ok := didRunMap[ms.all[i].Name]
 
 			if !ok || val == false {
 				toRun = append(toRun, ms.all[i])
+			} else {
+				didRun = append(didRun, ms.all[i])
 			}
 		}
 
 		ms.toRun = toRun
+		ms.didRun = didRun
 	})
 
 	return ms.handleError(err)
@@ -129,6 +133,31 @@ func (ms *Set) handleError(err error) error {
 	return err
 }
 
+type MigrationStatus struct {
+	Name   string
+	Status string
+}
+
+func (ms *Set) Status() ([]MigrationStatus, error) {
+	if err := ms.init(); err != nil {
+		return nil, err
+	}
+
+	m := make([]MigrationStatus, len(ms.didRun)+len(ms.toRun))
+
+	for i := range ms.didRun {
+		m[i].Name = ms.didRun[i].Name
+		m[i].Status = "run"
+	}
+
+	for i := range ms.toRun {
+		m[i+len(ms.didRun)].Name = ms.toRun[i].Name
+		m[i+len(ms.didRun)].Status = "not run"
+	}
+
+	return m, nil
+}
+
 func (ms *Set) Add(name string, up MigrationFn, down MigrationFn) {
 	ms.all = append(ms.all, Migration{
 		Name: name,
@@ -144,6 +173,25 @@ func (ms *Set) Up(count int) error {
 		return err
 	}
 
+	if count > len(ms.toRun) {
+		count = len(ms.toRun)
+	}
+
+	var (
+		db  = &DB{ms.txn}
+		upQ = `INSERT INTO ` + ms.Table + ` (name, direction) VALUES ($1, $2)`
+	)
+
+	for i := 0; i < count; i++ {
+		if err := ms.toRun[i].Up(db); err != nil {
+			return ms.handleError(err)
+		}
+
+		if err := db.Exec(upQ, ms.toRun[i].Name, "up"); err != nil {
+			return err
+		}
+	}
+
 	err := ms.txn.Commit()
 	return ms.handleError(err)
 }
@@ -153,11 +201,47 @@ func (ms *Set) Down(count int) error {
 		return err
 	}
 
+	l := len(ms.didRun)
+	if count > l {
+		count = l
+	}
+
+	var (
+		db    = &DB{ms.txn}
+		downQ = `INSERT INTO ` + ms.Table + ` (name, direction) VALUES ($1, $2)`
+	)
+
+	for i := l - 1; i >= l-count; i-- {
+		if err := ms.didRun[i].Down(db); err != nil {
+			return ms.handleError(err)
+		}
+
+		if err := db.Exec(downQ, ms.didRun[i].Name, "down"); err != nil {
+			return err
+		}
+	}
+
 	err := ms.txn.Commit()
 	return ms.handleError(err)
+}
+
+func SetDB(db *pg.DB) {
+	defaultSet.db = db
+}
+
+func Status() ([]MigrationStatus, error) {
+	return defaultSet.Status()
 }
 
 func Add(name string, up MigrationFn, down MigrationFn) bool {
 	defaultSet.Add(name, up, down)
 	return true
+}
+
+func Up(count int) error {
+	return defaultSet.Up(count)
+}
+
+func Down(count int) error {
+	return defaultSet.Down(count)
 }
