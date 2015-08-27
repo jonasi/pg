@@ -32,18 +32,22 @@ func (q *queryer) GetMany(ctxt context.Context, dest interface{}, query string, 
 }
 
 func (q *queryer) Exec(ctxt context.Context, query string, args ...interface{}) (res sql.Result, err error) {
-	do(ctxt, query, args, func(query string, args ...interface{}) error {
-		res, err = q.impl.Exec(query, args...)
-		return err
+	err = do(ctxt, query, args, func(query string, args ...interface{}) error {
+		var err2 error
+		res, err2 = q.impl.Exec(query, args...)
+
+		return err2
 	})
 
 	return
 }
 
 func (q *queryer) Query(ctxt context.Context, query string, args ...interface{}) (rows *sqlx.Rows, err error) {
-	do(ctxt, query, args, func(query string, args ...interface{}) error {
-		rows, err = q.impl.Queryx(query, args)
-		return err
+	err = do(ctxt, query, args, func(query string, args ...interface{}) error {
+		var err2 error
+		rows, err2 = q.impl.Queryx(query, args)
+
+		return err2
 	})
 
 	return
