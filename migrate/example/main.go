@@ -18,8 +18,7 @@ func main() {
 		MaxConnections: envInt("PG_MAX_CONNECTIONS", 10),
 	}
 
-	db := pg.NewDB(conf)
-	migrate.Main(db, os.Args)
+	migrate.Main(conf, os.Args)
 }
 
 func env(name string, def string) string {

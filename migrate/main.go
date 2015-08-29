@@ -36,17 +36,18 @@ func (u *countVar) Set(str string) error {
 
 func (u *countVar) IsBoolFlag() bool { return true }
 
-func Main(db *pg.DB, args []string) {
+func Main(config pg.Config, args []string) {
 	if args == nil {
 		args = os.Args
 	}
 
 	var (
-		fs     = flag.NewFlagSet(args[0], flag.ExitOnError)
-		up     = countVar{math.MaxInt32, false}
-		down   = countVar{1, false}
-		dryrun = fs.Bool("dryrun", false, "perform a dry run operation")
-		status = fs.Bool("status", false, "print the current status of each migration")
+		fs      = flag.NewFlagSet(args[0], flag.ExitOnError)
+		up      = countVar{math.MaxInt32, false}
+		down    = countVar{1, false}
+		dryrun  = fs.Bool("dryrun", false, "perform a dry run operation")
+		status  = fs.Bool("status", false, "print the current status of each migration")
+		verbose = fs.Bool("verbose", false, "print more info")
 	)
 
 	fs.Var(&up, "up", "the number of migrations to run")
@@ -54,7 +55,12 @@ func Main(db *pg.DB, args []string) {
 
 	fs.Parse(args[1:])
 
+	l := &logger{*verbose}
+	config.Logger = &pgxLogger{l}
+	db := pg.NewDB(config)
+
 	SetDB(db)
+	SetLogger(l)
 
 	if *status {
 		st, err := Status()
@@ -75,11 +81,7 @@ func Main(db *pg.DB, args []string) {
 	}
 
 	if up.set {
-		if *dryrun {
-
-		}
-
-		if err := Up(int(up.value)); err != nil {
+		if err := Up(int(up.value), !*dryrun); err != nil {
 			panic(err)
 		}
 
@@ -87,11 +89,7 @@ func Main(db *pg.DB, args []string) {
 	}
 
 	if down.set {
-		if *dryrun {
-
-		}
-
-		if err := Down(down.value); err != nil {
+		if err := Down(down.value, !*dryrun); err != nil {
 			panic(err)
 		}
 

@@ -6,6 +6,7 @@ import (
 
 type DB struct {
 	db *pg.Txn
+	l  Logger
 }
 
 func (d *DB) Exec(query string, args ...interface{}) error {

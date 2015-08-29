@@ -13,6 +13,7 @@ type Config struct {
 	Password       string
 	Database       string
 	MaxConnections int
+	Logger         pgx.Logger
 }
 
 func NewDB(config Config) *DB {
@@ -32,6 +33,7 @@ func (d *DB) Open() error {
 			User:     d.config.Username,
 			Password: d.config.Password,
 			Database: d.config.Database,
+			Logger:   d.config.Logger,
 		},
 		MaxConnections: d.config.MaxConnections,
 	}
