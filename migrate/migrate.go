@@ -113,6 +113,18 @@ func (ms *Set) init() error {
 			return
 		}
 
+		ms.initErr = ms.txn.Exec(`
+			create or replace view ` + ms.table + `_current as (
+				select name, created_at from (
+					select distinct on (name) * from ` + ms.table + ` order by name, created_at desc
+				) x where direction = 'up' order by created_at
+			)
+		`)
+
+		if ms.initErr != nil {
+			return
+		}
+
 		var log []Event
 		ms.initErr = ms.txn.db.GetMany(Ctxt, &log, `select * from `+ms.table+` order by created_at`)
 
